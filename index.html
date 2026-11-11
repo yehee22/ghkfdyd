@@ -50,14 +50,15 @@ function showCommentStatus(message, isError=false){
   el.textContent=message;
   el.style.color=isError?'#9b3d2a':'var(--orange)';
 }
-function loadComments(){
+function loadComments(onLoaded){
   const list=document.getElementById('commentsList');
-  const callback='campusRideComments_'+Date.now();
+  const callback='campusRideComments_'+Date.now()+'_'+Math.floor(Math.random()*10000);
   const script=document.createElement('script');
-  window[callback]=function(result){
-    try{
-      if(!result || result.success!==true) throw new Error('댓글을 불러오지 못했습니다.');
-      const comments=Array.isArray(result.comments)?result.comments:[];
+  let finished=false;
+  const finish=(ok, comments=[])=>{
+    if(finished)return;
+    finished=true;
+    if(ok){
       list.replaceChildren();
       if(comments.length===0){
         const empty=document.createElement('div');
@@ -73,25 +74,26 @@ function loadComments(){
           content.textContent=String(item.comment||'');
           const date=document.createElement('div');
           date.className='comment-date';
-          date.textContent=item.createdAt||'';
+          date.textContent=String(item.createdAt||'');
           article.append(content,date);
           list.appendChild(article);
         });
       }
-    }catch(error){
-      list.textContent='댓글을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.';
-    }finally{
-      delete window[callback];
-      script.remove();
+    }else{
+      list.textContent='댓글 목록을 불러오지 못했습니다. 서버 코드 적용 및 웹 앱 재배포 여부를 확인해주세요.';
     }
-  };
-  script.onerror=function(){
-    list.textContent='댓글 목록 연결에 실패했습니다. 잠시 후 다시 시도해주세요.';
+    if(typeof onLoaded==='function')onLoaded(ok,comments);
     delete window[callback];
     script.remove();
   };
-  script.src=COMMENT_API+'?action=getComments&callback='+encodeURIComponent(callback);
+  window[callback]=result=>{
+    if(!result||result.success!==true||!Array.isArray(result.comments)){finish(false);return;}
+    finish(true,result.comments);
+  };
+  script.onerror=()=>finish(false);
+  script.src=COMMENT_API+'?action=getComments&callback='+encodeURIComponent(callback)+'&t='+Date.now();
   document.body.appendChild(script);
+  setTimeout(()=>finish(false),12000);
 }
 function submitComment(event){
   event.preventDefault();
@@ -107,13 +109,20 @@ function submitComment(event){
   payload.set('page',window.location.href);
   fetch(COMMENT_API,{method:'POST',mode:'no-cors',body:payload})
     .then(()=>{
-      form.reset();
-      showCommentStatus('댓글 등록 요청을 보냈습니다. 목록에 반영되기까지 잠시 걸릴 수 있어요.');
-      setTimeout(loadComments,1800);
+      showCommentStatus('저장 여부를 확인하고 있습니다…');
+      setTimeout(()=>{
+        loadComments((ok,comments)=>{
+          const saved=ok&&comments.some(item=>String(item.comment||'')===comment);
+          if(saved){
+            form.reset();
+            showCommentStatus('댓글이 Google Sheets에 저장된 것을 확인했어요.');
+          }else{
+            showCommentStatus('전송 요청은 보냈지만 저장 여부를 확인하지 못했어요. Apps Script 배포와 시트 권한을 확인해주세요.',true);
+          }
+        });
+      },1800);
     })
-    .catch(()=>{
-      showCommentStatus('전송에 실패했습니다. 잠시 후 다시 시도해주세요.',true);
-    })
+    .catch(()=>showCommentStatus('전송에 실패했습니다. 네트워크 연결을 확인해주세요.',true))
     .finally(()=>{
       button.disabled=false;
       button.textContent='댓글 남기기 →';
