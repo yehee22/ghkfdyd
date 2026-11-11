@@ -11,6 +11,7 @@
 const CONFIG = {
   SPREADSHEET_ID: '1iYjaV7QWP6ewAksUDyR5Ij9Qsewe_wI44oPypFoXDqs',
   SHEET_NAME: 'Comments',
+  APPLICATION_SHEET_NAME: 'RouteApplications',
   MAX_COMMENT_LENGTH: 300,
   MAX_LIST_COUNT: 100
 };
@@ -41,6 +42,40 @@ function setupDatabase() {
   sheet.setColumnWidth(5, 100);
   SpreadsheetApp.flush();
   return 'DB 설정 완료';
+}
+
+
+function getApplicationSheet() {
+  const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  let sheet = ss.getSheetByName(CONFIG.APPLICATION_SHEET_NAME);
+  if (!sheet) sheet = ss.insertSheet(CONFIG.APPLICATION_SHEET_NAME);
+  const headers = ['ID', '신청일시', '이름', '이메일', '학교', '출발 지역', '희망 이용 시간', '추가 의견', '페이지주소', '상태'];
+  if (sheet.getLastRow() === 0) {
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#d9ead3');
+  [180, 160, 120, 220, 180, 140, 140, 420, 280, 100].forEach((width, i) => sheet.setColumnWidth(i + 1, width));
+  return sheet;
+}
+
+function saveRouteApplication(data) {
+  const name = String(data.name || '').trim().substring(0, 40);
+  const email = String(data.email || '').trim().substring(0, 120);
+  const school = String(data.school || '').trim().substring(0, 80);
+  const area = String(data.area || '').trim().substring(0, 80);
+  const time = String(data.time || '').trim().substring(0, 80);
+  const comment = String(data.comment || '').trim().substring(0, 300);
+  if (!name || !email || !school || !area) {
+    return jsonResponse({ success: false, message: '필수 항목을 입력해주세요.' });
+  }
+  const sheet = getApplicationSheet();
+  sheet.appendRow([
+    Utilities.getUuid(), new Date(), name, email, school, area, time,
+    comment, String(data.page || '').substring(0, 500), '접수'
+  ]);
+  SpreadsheetApp.flush();
+  return jsonResponse({ success: true, message: '신청이 접수되었습니다.' });
 }
 
 function getCommentSheet() {
@@ -119,6 +154,13 @@ function doPost(e) {
       data = JSON.parse(e.postData.contents || '{}');
     } else {
       data = e.parameter || {};
+    }
+
+    if (data.action === 'application') {
+      if (data.website) return jsonResponse({ success: false, message: '등록할 수 없습니다.' });
+      lock = LockService.getScriptLock();
+      lock.waitLock(10000);
+      return saveRouteApplication(data);
     }
 
     if (data.website) {
